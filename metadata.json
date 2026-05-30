@@ -1,0 +1,6 @@
+{
+  "name": "AI StockVision",
+  "description": "Real-Time AI-powered Financial Intelligence Platform featuring model forecasting, live technical indicators, and real-time sentiment analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

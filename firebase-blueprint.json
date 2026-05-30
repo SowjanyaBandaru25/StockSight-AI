@@ -1,0 +1,38 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The unique user authentication ID" },
+        "email": { "type": "string", "description": "User registered email" },
+        "displayName": { "type": "string", "description": "Display name of the user" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Profile registration time" }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "Preference": {
+      "title": "UserPreference",
+      "description": "Users preferences and watchlists",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Owner userId reference" },
+        "watchlist": { "type": "array", "description": "List of stock symbols on watchlist" },
+        "riskTolerance": { "type": "string", "description": "Selected risk profile category" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last update timestamp" }
+      },
+      "required": ["userId", "watchlist", "riskTolerance", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles registry directory"
+    },
+    "/preferences/{userId}": {
+      "schema": "Preference",
+      "description": "Individual users customizable preferences"
+    }
+  }
+}
