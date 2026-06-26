@@ -81,7 +81,9 @@ export default function App() {
     setLoading(true);
     setErrorObj(null);
     try {
-      const response = await fetch(`/api/stock/${symbol}`);
+      const API = import.meta.env.VITE_API_URL;
+
+const response = await fetch(`${API}/api/stock/${symbol}`);
       if (!response.ok) {
         throw new Error("Failed to process stock indicators pipeline.");
       }
@@ -109,9 +111,13 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws/live?symbol=${activeSymbol}`;
+   const backend = import.meta.env.VITE_API_URL;
+
+const wsUrl =
+  backend
+    .replace("https://", "wss://")
+    .replace("http://", "ws://") +
+  `/ws/live?symbol=${activeSymbol}`;
 
     console.log(`Connecting dynamic tick streaming WebSocket: ${wsUrl}`);
     const ws = new WebSocket(wsUrl);
