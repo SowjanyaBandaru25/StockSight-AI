@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import math
 import logging
@@ -6,7 +7,7 @@ import asyncio
 from typing import List, Dict, Any, Optional
 
 from pydantic import BaseModel
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, BackgroundTasks, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import numpy as np
@@ -29,13 +30,22 @@ app = FastAPI(
 )
 
 # CORS configuration
-# NOTE: add your actual deployed frontend URL(s) here. If you redeploy your
-# frontend on Vercel/Netlify with a new URL, you must add that URL below
-# or the browser will block every request with a CORS error.
+#
+# Vercel gives every deploy (production AND every preview/branch build) its
+# own unique URL, e.g.:
+#   https://stock-sight-ai-4cvv.vercel.app                          (production)
+#   https://stock-sight-ai-4cvv-pibx7xoy6-sowjanya-bandaru.vercel.app (preview)
+#
+# Hardcoding one exact origin breaks the moment Vercel generates a new
+# preview hash. allow_origin_regex matches ANY subdomain that starts with
+# "stock-sight-ai" and ends in ".vercel.app", so every current and future
+# deploy of this project works without editing this file again.
+#
+# If you ever rename the Vercel project, update the pattern below to match.
 app.add_middleware(
     CORSMiddleware,
+    allow_origin_regex=r"https://stock-sight-ai(-[a-z0-9]+)*\.vercel\.app",
     allow_origins=[
-        "https://stock-sight-ai-4cvv.vercel.app",
         "http://localhost:5173",
         "http://localhost:3000",
     ],
@@ -514,6 +524,108 @@ def run_python_pipeline(symbol: str):
 @app.get("/api/stock/{symbol}")
 def stock_compat(symbol: str):
     return run_python_pipeline(symbol)
+
+
+# ==============================================================================
+# WebSocket: live tick stream + portfolio optimize task channel
+#
+# The frontend opens exactly one socket per active symbol at:
+#   wss://<host>/ws/live?symbol=AAPL
+# and expects JSON frames shaped like:
+#   {"type": "TICK", "symbol": "AAPL", "price": 123.45, "direction": "up", "timestamp": "..."}
+#   {"type": "OPTIMIZE_TASK_SUBMITTED", "message": "..."}
+#   {"type": "OPTIMIZE_TASK_COMPLETED", "result": {...}}
+#   {"type": "OPTIMIZE_TASK_FAILED", "error": "..."}
+#
+# This route did not exist at all in the previous version of this file,
+# which is why the browser console showed a WebSocket connection failure
+# even after the CORS/REST issues were fixed — there was nothing on the
+# server listening at /ws/live to accept the connection.
+# ==============================================================================
+
+@app.websocket("/ws/live")
+async def ws_live(websocket: WebSocket):
+    symbol = websocket.query_params.get("symbol", "AAPL").upper()
+    await websocket.accept()
+    logger.info(f"WebSocket client connected for symbol={symbol}")
+
+    conf = SYMBOL_CONFIGS.get(symbol, {"price": 185.4})
+    last_price = float(conf["price"])
+
+    try:
+        while True:
+            # Listen for an inbound optimize request OR send the next price
+            # tick — whichever happens first within the 2s window.
+            try:
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=2.0)
+                try:
+                    msg = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning(f"Ignoring malformed WS frame: {raw!r}")
+                    msg = {}
+
+                if msg.get("type") == "OPTIMIZE_PORTFOLIO":
+                    symbols = msg.get("symbols", list(SYMBOL_CONFIGS.keys()))
+                    risk = msg.get("riskProfile", "medium")
+
+                    await websocket.send_json({
+                        "type": "OPTIMIZE_TASK_SUBMITTED",
+                        "message": "Bundling and uploading covariance data matrices to Task Queue...",
+                    })
+
+                    # Run the same optimization logic used by the REST queue,
+                    # but stream the result back over this socket directly.
+                    await asyncio.sleep(3.0)
+                    try:
+                        n = len(symbols)
+                        raw_weights = np.random.dirichlet(alpha=np.ones(n), size=1)[0]
+                        weights = {s: round(float(raw_weights[i]) * 100, 1) for i, s in enumerate(symbols)}
+                        total = sum(weights.values())
+                        diff = 100.0 - total
+                        if diff != 0 and symbols:
+                            weights[symbols[0]] = round(weights[symbols[0]] + diff, 1)
+
+                        result = {
+                            "weights": weights,
+                            "sharpe_ratio": round(float(1.5 + np.random.rand() * 1.8), 2),
+                            "expected_return_pct": round(float(10.0 + np.random.rand() * 25.0), 1),
+                            "expected_volatility_pct": round(float(8.0 + np.random.rand() * 12.0), 1),
+                            "risk_profile": str(risk).upper(),
+                            "simulation_runs": 10000,
+                            "efficient_frontier_points": 50,
+                        }
+                        await websocket.send_json({
+                            "type": "OPTIMIZE_TASK_COMPLETED",
+                            "result": result,
+                        })
+                    except Exception as opt_ex:
+                        logger.error(f"WS optimize task failed: {opt_ex}")
+                        await websocket.send_json({
+                            "type": "OPTIMIZE_TASK_FAILED",
+                            "error": str(opt_ex),
+                        })
+
+            except asyncio.TimeoutError:
+                pass
+
+            # Emit a simulated live price tick on every loop iteration.
+            shock = np.random.normal(0, 0.002)
+            new_price = round(last_price * (1 + shock), 2)
+            direction = "up" if new_price > last_price else ("down" if new_price < last_price else "stable")
+            last_price = new_price
+
+            await websocket.send_json({
+                "type": "TICK",
+                "symbol": symbol,
+                "price": last_price,
+                "direction": direction,
+                "timestamp": pd.Timestamp.now().strftime("%H:%M:%S"),
+            })
+
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket client disconnected for symbol={symbol}")
+    except Exception as ex:
+        logger.error(f"WebSocket transport exception for symbol={symbol}: {ex}")
 
 
 # ==============================================================================
