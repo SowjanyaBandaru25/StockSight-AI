@@ -1,13 +1,8 @@
-# ==============================================================================
-# AI StockVision Platform Python Package Manifest
-# ==============================================================================
-
-fastapi>=0.100.0,<0.111.0
-uvicorn>=0.20.0,<0.29.0
-pandas>=2.0.0,<2.3.0
-numpy>=1.26.4,<2.0.0
-scikit-learn>=1.0.0,<1.5.0
-pydantic>=2.0.0,<2.7.0
-requests>=2.28.0,<2.32.0
-python-dotenv>=1.0.0,<1.1.0
-
+fastapi==0.110.3
+uvicorn==0.28.1
+numpy==1.26.4
+pandas==2.2.2
+scikit-learn==1.4.2
+pydantic==2.6.4
+requests==2.31.0
+python-dotenv==1.0.1
