@@ -411,8 +411,9 @@ def check_optimizer_task_status(task_id: str):
 # Main execution routine
 def main():
     logger.info("Launching decoupled FastAPI service gateway...")
-    port = int(os.environ.get("PYTHON_PORT", 8000))
+   port = int(os.environ.get("PORT", 8000))
     host = "0.0.0.0"
+
     uvicorn.run(app, host=host, port=port)
 
 if __name__ == "__main__":
