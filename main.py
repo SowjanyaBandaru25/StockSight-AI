@@ -193,6 +193,7 @@ def calculate_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     std20 = close.rolling(window=20, min_periods=1).std().fillna(1.0)
     df["bbUpper"] = np.round(sma20 + (2 * std20), 2)
     df["bbLower"] = np.round(sma20 - (2 * std20), 2)
+    df["bbMiddle"] = np.round(sma20, 2)  # StockChart.tsx renders this as the BB middle line
 
     # 6. ATR (14)
     high_low = df["high"] - df["low"]
@@ -279,44 +280,56 @@ def build_portfolio_diversification(volatility: float) -> Dict[str, Any]:
     }
 
 
-INDICATOR_EXPLANATIONS = [
-    {
-        "key": "sma",
-        "name": "Simple Moving Average (SMA-20)",
-        "description": "Average closing price over the last 20 sessions. Smooths short-term noise to reveal the underlying trend direction.",
-        "formula": "SMA = (P1 + P2 + ... + Pn) / n",
-    },
-    {
-        "key": "ema",
-        "name": "Exponential Moving Average (EMA-12)",
-        "description": "Like the SMA, but weights recent prices more heavily, making it more responsive to new information.",
-        "formula": "EMA_t = P_t * k + EMA_{t-1} * (1 - k), where k = 2/(n+1)",
-    },
-    {
-        "key": "rsi",
-        "name": "Relative Strength Index (RSI-14)",
-        "description": "Momentum oscillator from 0-100. Above 70 typically signals overbought conditions; below 30 signals oversold.",
-        "formula": "RSI = 100 - [100 / (1 + RS)], RS = avg gain / avg loss",
-    },
-    {
-        "key": "macd",
-        "name": "MACD Histogram",
-        "description": "Difference between the MACD line (EMA12 - EMA26) and its signal line (EMA9 of MACD). Highlights momentum shifts.",
-        "formula": "MACD = EMA12 - EMA26; Histogram = MACD - Signal",
-    },
-    {
-        "key": "bb",
-        "name": "Bollinger Bands",
-        "description": "Bands plotted two standard deviations above and below a 20-day SMA. Width reflects volatility; price touching a band can signal reversal.",
-        "formula": "Upper = SMA20 + 2σ; Lower = SMA20 - 2σ",
-    },
-    {
-        "key": "atr",
-        "name": "Average True Range (ATR-14)",
-        "description": "Measures volatility by averaging the true range (largest of high-low, high-prevClose, low-prevClose) over 14 periods.",
-        "formula": "ATR = SMA(TR, 14)",
-    },
-]
+def build_indicators_explanation(last_row: pd.Series) -> Dict[str, Dict[str, str]]:
+    """
+    Builds the indicator glossary in the EXACT shape IndicatorsPanel.tsx expects:
+        Record<string, { label: string; value: string; explanation: string }>
+    keyed by the same names used in that component's `aiUsages` map
+    (SMA, EMA, RSI, MACD, BollingerBands, ATR, Volatility, Momentum) —
+    NOT an array, and NOT the old key/name/description/formula shape.
+    """
+    return {
+        "SMA": {
+            "label": "Simple Moving Average (20-day)",
+            "value": f"${float(last_row['sma']):.2f}",
+            "explanation": "Average closing price over the last 20 sessions. Smooths short-term noise to reveal the underlying trend direction.",
+        },
+        "EMA": {
+            "label": "Exponential Moving Average (12-day)",
+            "value": f"${float(last_row['ema']):.2f}",
+            "explanation": "Like the SMA, but weights recent prices more heavily, making it more responsive to new information.",
+        },
+        "RSI": {
+            "label": "Relative Strength Index (14-day)",
+            "value": f"{float(last_row['rsi']):.1f}",
+            "explanation": "Momentum oscillator from 0-100. Above 70 typically signals overbought conditions; below 30 signals oversold.",
+        },
+        "MACD": {
+            "label": "MACD Histogram",
+            "value": f"{float(last_row['macdHist']):.2f}",
+            "explanation": "Difference between the MACD line (EMA12 - EMA26) and its signal line (EMA9 of MACD). Highlights momentum shifts.",
+        },
+        "BollingerBands": {
+            "label": "Bollinger Bands (20, 2σ)",
+            "value": f"${float(last_row['bbLower']):.2f} - ${float(last_row['bbUpper']):.2f}",
+            "explanation": "Bands plotted two standard deviations above and below a 20-day SMA. Width reflects volatility; price touching a band can signal reversal.",
+        },
+        "ATR": {
+            "label": "Average True Range (14-day)",
+            "value": f"${float(last_row['atr']):.2f}",
+            "explanation": "Measures volatility by averaging the true range over 14 periods. Higher ATR means wider, more volatile price swings.",
+        },
+        "Volatility": {
+            "label": "Historical Volatility (14-day)",
+            "value": f"{float(last_row['volatility']):.2f}%",
+            "explanation": "Standard deviation of daily returns over the last 14 sessions, annualized as a percentage.",
+        },
+        "Momentum": {
+            "label": "Absolute Momentum (10-day)",
+            "value": f"${float(last_row['momentum']):.2f}",
+            "explanation": "Change in closing price compared to 10 sessions ago. Positive values indicate upward momentum.",
+        },
+    }
 
 
 # ==============================================================================
@@ -376,6 +389,7 @@ def run_python_pipeline(symbol: str):
             "macdHist": float(r["macdHist"]),
             "bbUpper": float(r["bbUpper"]),
             "bbLower": float(r["bbLower"]),
+            "bbMiddle": float(r["bbMiddle"]),
             "atr": float(r["atr"]),
             "volatility": float(r["volatility"]),
             "momentum": float(r["momentum"]),
@@ -504,6 +518,9 @@ def run_python_pipeline(symbol: str):
     # 8. Portfolio diversification / risk block
     portfolio_diversification = build_portfolio_diversification(last_vol)
 
+    # 9. Indicator glossary, built from the LIVE last row so values are current
+    indicators_explanation = build_indicators_explanation(last_row)
+
     return {
         "symbol": symbol,
         "metadata": metadata,
@@ -514,7 +531,7 @@ def run_python_pipeline(symbol: str):
         "news": news_block["news"],
         "overallSentiment": news_block["overallSentiment"],
         "portfolioDiversification": portfolio_diversification,
-        "indicatorsExplanation": INDICATOR_EXPLANATIONS,
+        "indicatorsExplanation": indicators_explanation,
         "computed_at": time.time(),
     }
 
