@@ -83,7 +83,7 @@ export default function App() {
     try {
       const API = import.meta.env.VITE_API_URL;
 
-const response = await fetch(`${API}/api/stock/${symbol}`);
+const response = await fetch(`${API}/api/python/stock/${symbol}`);
       if (!response.ok) {
         throw new Error("Failed to process stock indicators pipeline.");
       }
