@@ -205,9 +205,14 @@ def calculate_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
 # REST API Endpoints Fulfilling Decoupled Quant Operations
 # ==============================================================================
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def root():
-    """Simple landing route so visiting the bare Render URL doesn't 404."""
+    """Landing route so visiting the bare Render URL doesn't 404.
+
+    Accepts both GET and HEAD — some uptime monitors / load balancers
+    (including Render's own port check at boot) send HEAD requests, and
+    FastAPI only auto-handles HEAD for routes that declare it explicitly.
+    """
     return {
         "service": "AI StockVision Quantitative Gateway",
         "status": "online",
