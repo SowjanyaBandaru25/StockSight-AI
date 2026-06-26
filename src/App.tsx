@@ -50,12 +50,12 @@ export default function App() {
   const [activeIndicator, setActiveIndicator] = useState<"none" | "bb" | "sma" | "ema" | "macd" | "rsi">("none");
   const [selectedModel, setSelectedModel] = useState<string>("LSTM");
   const [timeframe, setTimeframe] = useState<"1D" | "1W" | "1M" | "3M">("1M");
-  
+
   // Real-time calculation state
   const [data, setData] = useState<StockAnalysisData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [errorObj, setErrorObj] = useState<string | null>(null);
-  
+
   // High-frequency bid/ask ticks
   const [lastTickPrice, setLastTickPrice] = useState<number | null>(null);
   const [tickDirection, setTickDirection] = useState<"up" | "down" | "stable">("stable");
@@ -83,9 +83,26 @@ export default function App() {
     try {
       const API = import.meta.env.VITE_API_URL;
 
-const response = await fetch(`${API}/api/python/stock/${symbol}`);
+      // Fail loudly and clearly instead of a cryptic "Failed to fetch"
+      // when the build-time env var was never set.
+      if (!API) {
+        throw new Error(
+          "VITE_API_URL is not set. Add it as an environment variable in your " +
+          "frontend hosting dashboard (e.g. Vercel/Netlify) pointing at your " +
+          "backend, e.g. https://your-backend.onrender.com — then redeploy."
+        );
+      }
+
+      const response = await fetch(`${API}/api/python/stock/${symbol}`);
       if (!response.ok) {
-        throw new Error("Failed to process stock indicators pipeline.");
+        let detail = "";
+        try {
+          const errBody = await response.json();
+          detail = errBody?.detail ? ` (${errBody.detail})` : "";
+        } catch {
+          // response wasn't JSON, ignore
+        }
+        throw new Error(`Failed to process stock indicators pipeline.${detail}`);
       }
       const payload: StockAnalysisData = await response.json();
       setData(payload);
@@ -111,13 +128,17 @@ const response = await fetch(`${API}/api/python/stock/${symbol}`);
   useEffect(() => {
     if (!user) return;
 
-   const backend = import.meta.env.VITE_API_URL;
+    const backend = import.meta.env.VITE_API_URL;
+    if (!backend) {
+      console.error("VITE_API_URL is not set — skipping WebSocket connection.");
+      return;
+    }
 
-const wsUrl =
-  backend
-    .replace("https://", "wss://")
-    .replace("http://", "ws://") +
-  `/ws/live?symbol=${activeSymbol}`;
+    const wsUrl =
+      backend
+        .replace("https://", "wss://")
+        .replace("http://", "ws://") +
+      `/ws/live?symbol=${activeSymbol}`;
 
     console.log(`Connecting dynamic tick streaming WebSocket: ${wsUrl}`);
     const ws = new WebSocket(wsUrl);
@@ -126,7 +147,7 @@ const wsUrl =
     ws.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data);
-        
+
         if (payload.type === "TICK" && payload.symbol === activeSymbol) {
           setLastTickPrice(payload.price);
           setTickDirection(payload.direction);
@@ -186,8 +207,8 @@ const wsUrl =
 
   return (
     <div id="main_dashboard_layout" className={`min-h-screen font-sans tracking-tight transition-colors duration-300 relative overflow-hidden ${
-      theme === "dark" 
-        ? "bg-slate-950 text-slate-100" 
+      theme === "dark"
+        ? "bg-slate-950 text-slate-100"
         : "bg-slate-50 text-slate-800"
     }`}>
       {/* Absolute Dynamic Gradient Glow Effects */}
@@ -352,7 +373,7 @@ const wsUrl =
                 <option value="bb">Bollinger Bands</option>
               </select>
             </div>
-            
+
             <div className={`h-4 w-[1px] hidden sm:block ${theme === "dark" ? "bg-slate-850" : "bg-slate-200"}`} />
 
             <div className={`flex items-center gap-0.5 rounded-lg p-1 border font-mono text-2xs ${
@@ -365,10 +386,10 @@ const wsUrl =
                   key={t}
                   onClick={() => setTimeframe(t)}
                   className={`rounded-md px-3 py-1.5 font-bold cursor-pointer transition-all ${
-                    timeframe === t 
+                    timeframe === t
                       ? theme === "dark"
-                        ? "bg-slate-900 border border-slate-800 text-indigo-400 shadow-xs animate-bounce-once" 
-                        : "bg-white border border-slate-200 text-indigo-700 shadow-xs" 
+                        ? "bg-slate-900 border border-slate-800 text-indigo-400 shadow-xs animate-bounce-once"
+                        : "bg-white border border-slate-200 text-indigo-700 shadow-xs"
                       : theme === "dark"
                         ? "text-slate-500 hover:text-slate-300"
                         : "text-slate-505 hover:text-slate-800"
@@ -389,12 +410,12 @@ const wsUrl =
           </div>
         ) : data ? (
           <div className="space-y-16">
-            
+
             {/* Stat Cards Row */}
             <div>
               <span className={`text-xs font-mono font-black uppercase tracking-widest block mb-4 text-transparent bg-clip-text bg-gradient-to-r ${
-                theme === "dark" 
-                  ? "from-pink-400 via-rose-400 via-purple-400 to-indigo-400" 
+                theme === "dark"
+                  ? "from-pink-400 via-rose-400 via-purple-400 to-indigo-400"
                   : "from-pink-600 via-rose-500 via-purple-600 to-indigo-700"
               }`}>
                 ⚡ Key Metrics at a glance
@@ -679,7 +700,7 @@ const wsUrl =
               }`}>
                 A compliance note regarding machine learning approximations, risk mitigation, and backtesting safety protocols.
               </p>
-              
+
               <div className={`rounded-2xl border p-8 font-sans shadow-xs relative overflow-hidden transition-all duration-300 ${
                 theme === "dark" ? "border-slate-800 bg-slate-950 text-slate-350" : "border-slate-200 bg-white"
               }`}>
