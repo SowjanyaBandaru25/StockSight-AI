@@ -1,7 +1,3 @@
-# ==============================================================================
-# AI StockVision Platform — FastAPI Quantitative Microservice Gateway
-# ==============================================================================
-
 import os
 import time
 import math
@@ -29,15 +25,19 @@ logger = logging.getLogger("AI-StockVision-FastAPI")
 app = FastAPI(
     title="AI StockVision Quantitative Engine",
     description="FastAPI service for indicators, unsupervised clustering, ML forecasters, and task offloading",
-    version="1.0.0",
+    version="1.0.1",
 )
 
 # CORS configuration
+# NOTE: add your actual deployed frontend URL(s) here. If you redeploy your
+# frontend on Vercel/Netlify with a new URL, you must add that URL below
+# or the browser will block every request with a CORS error.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://stock-sight-ai-4cvv.vercel.app",
-        "http://localhost:5173"
+        "http://localhost:5173",
+        "http://localhost:3000",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -204,18 +204,118 @@ def calculate_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def build_news_and_sentiment(symbol: str, name: str, change_percent: float) -> Dict[str, Any]:
+    """Builds a deterministic-ish simulated news feed and overall sentiment block."""
+    bias = "bullish" if change_percent >= 0 else "bearish"
+
+    headline_bank = [
+        (f"{name} shares react as analysts weigh in on {symbol} outlook", "positive" if bias == "bullish" else "negative"),
+        (f"Institutional flows shift around {symbol} amid sector rotation", "neutral"),
+        (f"{name} options activity spikes ahead of next earnings window", "positive"),
+        (f"Macro headwinds put pressure on {symbol} trading desks", "negative"),
+        (f"{name} maintains analyst coverage with mixed price targets", "neutral"),
+    ]
+
+    sources = ["MarketWatch", "Bloomberg", "Reuters", "Yahoo Finance", "Seeking Alpha"]
+    news_items = []
+    now = time.time()
+    for i, (headline, sentiment) in enumerate(headline_bank):
+        score = {"positive": round(0.55 + np.random.rand() * 0.4, 2),
+                 "negative": round(-0.55 - np.random.rand() * 0.4, 2),
+                 "neutral": round(np.random.uniform(-0.15, 0.15), 2)}[sentiment]
+        news_items.append({
+            "id": f"news-{symbol}-{i}",
+            "headline": headline,
+            "source": sources[i % len(sources)],
+            "sentiment": sentiment,
+            "sentimentScore": score,
+            "publishedAt": pd.Timestamp.fromtimestamp(now - i * 3600 * 5).isoformat(),
+        })
+
+    avg_score = round(float(np.mean([n["sentimentScore"] for n in news_items])), 2)
+    if avg_score > 0.15:
+        label = "Bullish"
+    elif avg_score < -0.15:
+        label = "Bearish"
+    else:
+        label = "Neutral"
+
+    return {
+        "news": news_items,
+        "overallSentiment": {
+            "label": label,
+            "score": avg_score,
+            "positiveCount": sum(1 for n in news_items if n["sentiment"] == "positive"),
+            "negativeCount": sum(1 for n in news_items if n["sentiment"] == "negative"),
+            "neutralCount": sum(1 for n in news_items if n["sentiment"] == "neutral"),
+        },
+    }
+
+
+def build_portfolio_diversification(volatility: float) -> Dict[str, Any]:
+    """Builds the risk/diversification summary block the frontend expects."""
+    if volatility < 1.2:
+        risk_category = "Low"
+    elif volatility < 2.5:
+        risk_category = "Medium"
+    else:
+        risk_category = "High"
+
+    return {
+        "riskCategory": risk_category,
+        "diversificationScore": round(float(60 + np.random.rand() * 35), 1),
+        "recommendedHedge": "Treasuries / Cash" if risk_category == "High" else "Sector ETFs",
+        "concentrationWarning": risk_category == "High",
+    }
+
+
+INDICATOR_EXPLANATIONS = [
+    {
+        "key": "sma",
+        "name": "Simple Moving Average (SMA-20)",
+        "description": "Average closing price over the last 20 sessions. Smooths short-term noise to reveal the underlying trend direction.",
+        "formula": "SMA = (P1 + P2 + ... + Pn) / n",
+    },
+    {
+        "key": "ema",
+        "name": "Exponential Moving Average (EMA-12)",
+        "description": "Like the SMA, but weights recent prices more heavily, making it more responsive to new information.",
+        "formula": "EMA_t = P_t * k + EMA_{t-1} * (1 - k), where k = 2/(n+1)",
+    },
+    {
+        "key": "rsi",
+        "name": "Relative Strength Index (RSI-14)",
+        "description": "Momentum oscillator from 0-100. Above 70 typically signals overbought conditions; below 30 signals oversold.",
+        "formula": "RSI = 100 - [100 / (1 + RS)], RS = avg gain / avg loss",
+    },
+    {
+        "key": "macd",
+        "name": "MACD Histogram",
+        "description": "Difference between the MACD line (EMA12 - EMA26) and its signal line (EMA9 of MACD). Highlights momentum shifts.",
+        "formula": "MACD = EMA12 - EMA26; Histogram = MACD - Signal",
+    },
+    {
+        "key": "bb",
+        "name": "Bollinger Bands",
+        "description": "Bands plotted two standard deviations above and below a 20-day SMA. Width reflects volatility; price touching a band can signal reversal.",
+        "formula": "Upper = SMA20 + 2σ; Lower = SMA20 - 2σ",
+    },
+    {
+        "key": "atr",
+        "name": "Average True Range (ATR-14)",
+        "description": "Measures volatility by averaging the true range (largest of high-low, high-prevClose, low-prevClose) over 14 periods.",
+        "formula": "ATR = SMA(TR, 14)",
+    },
+]
+
+
 # ==============================================================================
 # REST API Endpoints Fulfilling Decoupled Quant Operations
 # ==============================================================================
 
 @app.api_route("/", methods=["GET", "HEAD"])
 def root():
-    """Landing route so visiting the bare Render URL doesn't 404.
-
-    Accepts both GET and HEAD — some uptime monitors / load balancers
-    (including Render's own port check at boot) send HEAD requests, and
-    FastAPI only auto-handles HEAD for routes that declare it explicitly.
-    """
+    """Landing route so visiting the bare Render URL doesn't 404."""
     return {
         "service": "AI StockVision Quantitative Gateway",
         "status": "online",
@@ -241,6 +341,8 @@ def run_python_pipeline(symbol: str):
         raise HTTPException(status_code=400, detail=f"Stock symbol '{symbol}' is not currently supported.")
 
     logger.info(f"Executing decoupled python analytics core for {symbol}")
+
+    conf = SYMBOL_CONFIGS[symbol]
 
     # 1. GBM simulation path (150 days)
     df = generate_gbm_path(symbol, 150)
@@ -270,10 +372,27 @@ def run_python_pipeline(symbol: str):
         })
 
     last_row = df.iloc[-1]
+    prev_row = df.iloc[-2] if len(df) > 1 else last_row
     last_price = float(last_row["close"])
+    prev_price = float(prev_row["close"])
     last_vol = float(last_row["volatility"])
 
-    # 3. Simulated multi-model forecast suite
+    change = round(last_price - prev_price, 2)
+    change_percent = round((change / prev_price) * 100, 2) if prev_price else 0.0
+    volume_24h = int(df["volume"].tail(1).sum() * 1.0)
+
+    # 3. metadata block the frontend reads for the price card / header
+    metadata = {
+        "symbol": symbol,
+        "name": conf["name"],
+        "sector": conf["sector"],
+        "currentPrice": last_price,
+        "change": change,
+        "changePercent": change_percent,
+        "volume24h": volume_24h,
+    }
+
+    # 4. Simulated multi-model forecast suite
     predictions = {}
 
     all_models = [
@@ -312,7 +431,7 @@ def run_python_pipeline(symbol: str):
             "modelName": name,
             "nextDayPrice": round(pred_p, 2),
             "direction": "up" if pred_p >= last_price else "down",
-            "confidence": int(base_conf),
+            "confidence": int(min(base_conf, 99)),
             "metrics": {
                 "rmse": round(float(rmse + np.random.uniform(0.01, 0.09)), 3),
                 "mae": round(float(mae + np.random.uniform(0.01, 0.07)), 3),
@@ -323,7 +442,7 @@ def run_python_pipeline(symbol: str):
             "forecast": forecast_points,
         }
 
-    # 4. Outlier detection using scikit-learn IsolationForest
+    # 5. Outlier detection using scikit-learn IsolationForest
     try:
         pct_changes = df["close"].pct_change().fillna(0.0).values.reshape(-1, 1)
         clf = IsolationForest(contamination=0.04, random_state=42)
@@ -338,7 +457,7 @@ def run_python_pipeline(symbol: str):
         logger.error(f"IsolationForest exception model failed: {ex}")
         anomalies_list = [df.index[-5].strftime("%Y-%m-%d")]
 
-    # 5. K-Means clustering across all symbols
+    # 6. K-Means clustering across all symbols
     clusters_resp = {
         "High Performers": [],
         "Moderate Consolidation": [],
@@ -369,18 +488,33 @@ def run_python_pipeline(symbol: str):
         clusters_resp["Moderate Consolidation"] = [symbol]
         clusters_resp["Lagging Assets"] = ["TSLA"]
 
+    # 7. News + sentiment block
+    news_block = build_news_and_sentiment(symbol, conf["name"], change_percent)
+
+    # 8. Portfolio diversification / risk block
+    portfolio_diversification = build_portfolio_diversification(last_vol)
+
     return {
         "symbol": symbol,
+        "metadata": metadata,
         "historical": historical_points,
         "predictions": predictions,
         "anomalies": anomalies_list,
         "clusters": clusters_resp,
+        "news": news_block["news"],
+        "overallSentiment": news_block["overallSentiment"],
+        "portfolioDiversification": portfolio_diversification,
+        "indicatorsExplanation": INDICATOR_EXPLANATIONS,
         "computed_at": time.time(),
     }
-        # Compatibility endpoint for frontend
-    @app.get("/api/stock/{symbol}")
-    def stock(symbol: str):
-        return run_python_pipeline(symbol)
+
+
+# Compatibility endpoint for frontend (kept at top level, NOT nested
+# inside another function — that was the bug that broke deployment)
+@app.get("/api/stock/{symbol}")
+def stock_compat(symbol: str):
+    return run_python_pipeline(symbol)
+
 
 # ==============================================================================
 # Simulated Async Background Task Queue Endpoints
