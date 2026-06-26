@@ -1,8 +1,27 @@
-node_modules/
-build/
-dist/
-coverage/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Logs
 *.log
-.env*
-!.env.example
