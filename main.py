@@ -35,7 +35,10 @@ app = FastAPI(
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://stock-sight-ai-4cvv.vercel.app",
+        "http://localhost:5173"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -374,7 +377,10 @@ def run_python_pipeline(symbol: str):
         "clusters": clusters_resp,
         "computed_at": time.time(),
     }
-
+        # Compatibility endpoint for frontend
+    @app.get("/api/stock/{symbol}")
+    def stock(symbol: str):
+        return run_python_pipeline(symbol)
 
 # ==============================================================================
 # Simulated Async Background Task Queue Endpoints
